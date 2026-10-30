@@ -301,14 +301,19 @@ with tab_audio:
         st.audio(wav_bytes(fs, bits_a_audio(res_audio.bits_rx, bps)),
                  format="audio/wav")
     m = min(len(x_frag), len(bits) // bps)
-    fig, ax = plt.subplots(figsize=(11, 3))
-    ax.plot(bits_a_audio(bits, bps)[:m], color="gray",
-            label="original cuantizado")
-    ax.plot(bits_a_audio(res_audio.bits_rx, bps)[:m], color="tab:red", lw=0.9,
-            label="recibido")
-    ax.set_xlabel("muestra de audio")
-    ax.legend(fontsize=8)
-    ax.grid(alpha=0.3)
+    original = bits_a_audio(bits, bps)[:m]
+    recibido = bits_a_audio(res_audio.bits_rx, bps)[:m]
+    fig, (ax_q, ax_r) = plt.subplots(2, 1, figsize=(11, 5),
+                                     sharex=True, sharey=True)
+    ax_q.plot(original, color="gray", lw=0.8)
+    ax_q.set_title("Original (cuantizado)")
+    ax_q.set_ylabel("amplitud")
+    ax_q.grid(alpha=0.3)
+    ax_r.plot(recibido, color="tab:red", lw=0.8)
+    ax_r.set_title(f"Recibido — {NOMBRE_CANAL[tipo]}, n = {n}")
+    ax_r.set_xlabel("muestra de audio")
+    ax_r.set_ylabel("amplitud")
+    ax_r.grid(alpha=0.3)
     fig.tight_layout()
     st.pyplot(fig)
     plt.close(fig)
