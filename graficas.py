@@ -89,3 +89,11 @@ def dibujar_resumen(ax_ap, ax_ber, todos, valores_n=VALORES_N):
         ax.set_title(tit, fontsize=10)
         ax.grid(alpha=0.3)
         ax.legend(fontsize=8)
+
+    # Sin ruido la BER es 0 en todos los casos: un eje automático quedaría
+    # degenerado (límites negativos) y la curva plana no aportaría información.
+    if max(todos[(t, n)].ber for t in ("exponencial", "sinc") for n in valores_n) == 0:
+        ax_ber.set_ylim(0, 0.5)
+        ax_ber.text(0.5, 0.5, "BER = 0 en todos los casos\n(sin ruido, $\\sigma = 0$)",
+                    transform=ax_ber.transAxes, ha="center", va="center",
+                    fontsize=9, color="dimgray")
