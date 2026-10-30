@@ -7,6 +7,7 @@ para el informe del Trabajo 1 (tema: canal de comunicaciones).
 Uso:
     python generar_figuras.py                      # usa un audio sintético de prueba
     python generar_figuras.py --wav mi_audio.wav   # usa tu .wav sin comprimir
+    python generar_figuras.py --wav audios/Drown.wav
     python generar_figuras.py --wav mi_audio.wav --max-muestras 800 --sigma 0.1
 
 Salida (carpeta --salida, por defecto ./salida):
@@ -42,6 +43,9 @@ def main():
                     help="muestras de audio a transmitir (por defecto 500)")
     ap.add_argument("--inicio", type=int, default=0, help="muestra inicial del audio")
     ap.add_argument("--bits-por-muestra", type=int, default=8, choices=[8, 16])
+    ap.add_argument("--fs-objetivo", type=int, default=16000,
+                    help="frecuencia máxima de muestreo; si el .wav trae más, "
+                         "se remuestrea (por defecto 16000 Hz)")
     ap.add_argument("--sps", type=int, default=100, help="muestras de simulación por bit")
     ap.add_argument("--sigma", type=float, default=0.0, help="ruido gaussiano a la salida")
     ap.add_argument("--semilla", type=int, default=0)
@@ -51,7 +55,8 @@ def main():
     os.makedirs(os.path.join(a.salida, "audio"), exist_ok=True)
 
     # ---- 1. Fuente: audio -> bits ------------------------------------------
-    bits, fs, x = cargar_fuente(a.wav, a.max_muestras, a.inicio, a.bits_por_muestra)
+    bits, fs, x = cargar_fuente(a.wav, a.max_muestras, a.inicio,
+                                a.bits_por_muestra, fs_objetivo=a.fs_objetivo)
     print(f"Fuente: {'demo sintético' if a.wav is None else a.wav}")
     print(f"  fs audio = {fs} Hz | muestras = {len(x)} | bits/muestra = "
           f"{a.bits_por_muestra} | bits totales = {len(bits)}")

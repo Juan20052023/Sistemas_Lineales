@@ -82,10 +82,36 @@ instante de muestreo.
 | `canal_pcm.py` | Núcleo: lectura/escritura de `.wav`, cuantización, señal PCM, respuestas al impulso, convolución, ojo, detección y BER. |
 | `graficas.py` | Funciones de dibujo compartidas (señales, `h(t)`, `|H(f)|`, ojo y resumen). |
 | `generar_figuras.py` | Genera todas las figuras, la tabla CSV y los audios reconstruidos del informe. |
-| `app.py` | Interfaz interactiva en Streamlit para explorar los 10 casos y escuchar el resultado. |
+| `app.py` | Interfaz interactiva en Streamlit; carga automáticamente los audios de `audios/` y permite subir un `.wav` propio. |
+| `preparar_audios.py` | Convierte una carpeta de `.wav` en los fragmentos ligeros que se incluyen en `audios/`. |
+| `audios/` | Nueve fragmentos de 5 s (16 kHz, mono, PCM 16 bits) que la app carga al abrirse. |
 | `salida/` | Resultados generados: figuras, `tabla_resultados.csv` y audios `.wav`. |
 | `docs/enunciado_T1.pdf` | Enunciado del trabajo. |
 | `requirements.txt` | Dependencias (`numpy`, `scipy`, `matplotlib`, `streamlit`). |
+
+### 2.1 Audios incluidos en la aplicación
+
+La app no necesita que se suba nada: al abrirse muestra un selector con los
+nueve audios de `audios/` y carga el primero por defecto. El reproductor de la
+barra lateral permite escuchar el fragmento completo de 5 s.
+
+Para que la manipulación sea correcta, `preparar_audios.py` hace lo siguiente
+sobre cada archivo original (48 kHz, estéreo, float32):
+
+1. **Mezcla a mono** promediando los canales (no sumándolos, para no saturar).
+2. **Remuestreo con antialias** a 16 kHz mediante `resample_poly`; así no se
+   pliega el contenido de alta frecuencia sobre la banda útil.
+3. **Selección de la ventana de 5 s con mayor RMS**, para que el fragmento no
+   empiece en silencio.
+4. **Fundidos de entrada/salida de 10 ms** (coseno alzado) para evitar clics.
+5. **Normalización del pico a 0.9**, dejando margen para no saturar.
+6. **Guardado como PCM de 16 bits, mono**, que es lo que lee la app.
+
+La simulación trabaja sobre un fragmento corto (0.15 s por defecto) porque cada
+bit dura `Tb = 1 s` en el modelo: simular los 5 s completos requeriría millones
+de muestras por cada uno de los 10 casos. El fragmento y su duración se eligen
+con los controles de la barra lateral; el audio completo sigue disponible en el
+reproductor.
 
 ---
 
@@ -97,11 +123,15 @@ pip install -r requirements.txt
 # Figuras y tabla con el audio sintético de prueba
 python generar_figuras.py
 
-# Con un audio propio sin comprimir
+# Con un audio propio sin comprimir (o uno de los incluidos)
 python generar_figuras.py --wav mi_audio.wav --max-muestras 500
+python generar_figuras.py --wav audios/Drown.wav --max-muestras 4000
 
-# Interfaz interactiva
+# Interfaz interactiva (carga sola los audios de audios/)
 streamlit run app.py
+
+# Regenerar los fragmentos incluidos a partir de una carpeta de .wav
+python preparar_audios.py --origen "C:\ruta\a\mis\audios"
 ```
 
 Parámetros principales de `generar_figuras.py`:
@@ -112,6 +142,7 @@ Parámetros principales de `generar_figuras.py`:
 | `--max-muestras` | `500` | Muestras de audio a transmitir (cada una aporta 8 o 16 bits). |
 | `--inicio` | `0` | Muestra inicial del audio. |
 | `--bits-por-muestra` | `8` | `8` o `16` bits por muestra. |
+| `--fs-objetivo` | `16000` | Frecuencia máxima de muestreo; si el `.wav` trae más, se remuestrea con antialias. |
 | `--sps` | `100` | Muestras de simulación por bit. |
 | `--sigma` | `0.0` | Desviación estándar del ruido gaussiano a la salida del canal. |
 | `--salida` | `salida` | Carpeta de resultados. |

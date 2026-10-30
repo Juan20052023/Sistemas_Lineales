@@ -1,20 +1,31 @@
 """
 app.py — Interfaz interactiva (Streamlit) del Trabajo 1: canal de comunicaciones.
 
+Los audios de la carpeta `audios/` se cargan automáticamente al abrir la app;
+también se puede subir un .wav propio.  La simulación trabaja sobre un
+fragmento corto del audio (el tiempo de bit es Tb = 1 s, así que simular el
+audio completo requeriría millones de muestras por caso).
+
 Ejecutar:
     pip install -r requirements.txt
     streamlit run app.py
 """
 import io
+import json
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import streamlit as st
 
-from canal_pcm import (NOMBRE_CANAL, TIPOS_CANAL, VALORES_N, bits_a_audio,
-                       cargar_fuente, guardar_wav, simular_todo)
+from canal_pcm import (NOMBRE_CANAL, TIPOS_CANAL, VALORES_N, audio_a_bits,
+                       bits_a_audio, cargar_audio, guardar_wav, simular_todo)
 from graficas import (dibujar_h, dibujar_H, dibujar_ojo, dibujar_resumen,
                       dibujar_senales)
+
+AUDIOS_DIR = Path(__file__).resolve().parent / "audios"
+FS_OBJETIVO = 16000          # frecuencia a la que se simula (mono)
+PICO = 0.9                   # margen de normalización del fragmento
 
 st.set_page_config(page_title="Canal PCM — Diagrama de ojo", layout="wide")
 st.title("Transmisión PCM por un canal de ancho de banda limitado")
@@ -23,15 +34,35 @@ st.caption("Sistemas Lineales y Señales · Trabajo 1 · x(t) = s(t) ∗ h(t),  
 
 
 # ----------------------------------------------------------------------------
+# Audios incluidos
+# ----------------------------------------------------------------------------
+def audios_disponibles():
+    if not AUDIOS_DIR.is_dir():
+        return []
+    return sorted(p.name for p in AUDIOS_DIR.glob("*.wav"))
+
+
+def info_audios():
+    ruta = AUDIOS_DIR / "info.json"
+    if not ruta.is_file():
+        return {}
+    try:
+        with open(ruta, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+# ----------------------------------------------------------------------------
 # Caché de cálculos pesados
 # ----------------------------------------------------------------------------
-@st.cache_data(show_spinner="Leyendo audio…")
-def cargar(bytes_wav, max_muestras, inicio, bps):
+@st.cache_data(show_spinner="Cargando audio…")
+def cargar(bytes_wav):
     archivo = io.BytesIO(bytes_wav) if bytes_wav else None
-    return cargar_fuente(archivo, max_muestras, inicio, bps)
+    return cargar_audio(archivo, fs_objetivo=FS_OBJETIVO)
 
 
-@st.cache_data(show_spinner="Simulando los 10 casos (2 canales × 5 valores de n)…")
+@st.cache_resource(show_spinner="Simulando los 10 casos (2 canales × 5 valores de n)…")
 def correr(bits, sps, sigma, semilla):
     return simular_todo(bits, sps=sps, sigma=sigma, semilla=semilla)
 
@@ -43,32 +74,101 @@ def wav_bytes(fs, x):
 
 
 # ----------------------------------------------------------------------------
-# Barra lateral: parámetros
+# Barra lateral: fuente de bits y parámetros
 # ----------------------------------------------------------------------------
 with st.sidebar:
     st.header("Fuente de bits")
-    subido = st.file_uploader("Archivo .wav sin comprimir", type=["wav"])
-    max_muestras = st.slider("Muestras de audio a transmitir", 50, 2000, 400, 50,
-                             help="Cada muestra aporta 8 o 16 bits. Más muestras = "
-                                  "más bits = simulación más lenta.")
-    inicio = st.number_input("Muestra inicial", 0, 10_000_000, 0, 1000)
+    disponibles = audios_disponibles()
+    modo = st.radio("Origen del audio", ["Audio incluido", "Subir .wav"],
+                    horizontal=True)
+
+    bytes_wav = None
+    if modo == "Audio incluido":
+        if disponibles:
+            nombre = st.selectbox("Audio", disponibles)
+            bytes_wav = (AUDIOS_DIR / nombre).read_bytes()
+            st.audio(bytes_wav, format="audio/wav")
+            detalle = next((a for a in info_audios().get("audios", [])
+                            if a.get("archivo") == nombre), None)
+            desde = (f" (desde {detalle['inicio_s']:.1f} s del original)"
+                     if detalle else "")
+            dur_inc = detalle["duracion_s"] if detalle else 5.0
+            st.caption(f"Fragmento de {dur_inc:.0f} s incluido en la app "
+                       f"(16 kHz, mono, PCM 16 bits){desde}.")
+        else:
+            st.warning("No hay audios en la carpeta `audios/`; se usará el "
+                       "audio sintético de prueba.")
+    else:
+        subido = st.file_uploader("Archivo .wav sin comprimir", type=["wav"])
+        if subido is not None:
+            bytes_wav = subido.getvalue()
+        else:
+            st.info("Sin archivo: se usa el audio sintético de prueba.")
+
+    fs, x_full = cargar(bytes_wav)
+    dur_total = len(x_full) / fs
+    if dur_total < 0.02:
+        st.error("El audio es demasiado corto (mínimo 20 ms).")
+        st.stop()
+
+    st.header("Fragmento a simular")
+    dur_max = max(0.02, min(0.5, dur_total))
+    if "dur_s" not in st.session_state:
+        st.session_state.dur_s = 0.15
+    st.session_state.dur_s = float(
+        np.clip(st.session_state.dur_s, 0.02, dur_max))
+    if dur_max > 0.0201:
+        dur_s = st.slider("Duración [s]", 0.02, float(round(dur_max, 3)),
+                          step=0.01, key="dur_s",
+                          help="El tiempo de bit es Tb = 1 s; fragmentos más largos "
+                               "multiplican los bits y el costo de la simulación.")
+    else:
+        dur_s = dur_max
+        st.caption("Duración: 20 ms (el audio es muy corto).")
+    inicio_max = max(0.0, dur_total - dur_s)
+    if "inicio_s" not in st.session_state:
+        st.session_state.inicio_s = 0.0
+    st.session_state.inicio_s = float(
+        np.clip(st.session_state.inicio_s, 0.0, inicio_max))
+    if inicio_max > 0.001:
+        inicio_s = st.slider("Inicio [s]", 0.0, float(round(inicio_max, 3)),
+                             step=0.01, key="inicio_s")
+    else:
+        inicio_s = 0.0
+        st.caption("Inicio: 0 s (el fragmento ocupa todo el audio).")
+
     bps = st.radio("Bits por muestra", [8, 16], horizontal=True)
+    normalizar = st.checkbox("Normalizar el fragmento al pico", value=True,
+                             help="Usa todo el rango de cuantización. El pico se "
+                                  f"fija en {PICO:.1f} para no saturar.")
 
     st.header("Simulación")
-    sps = st.slider("Muestras de simulación por bit", 40, 200, 100, 20)
-    sigma = st.slider("Ruido gaussiano σ (a la salida del canal)", 0.0, 0.6, 0.0, 0.02)
+    sps = st.slider("Muestras de simulación por bit", 20, 200, 50, 10)
+    sigma = st.slider("Ruido gaussiano σ (a la salida del canal)", 0.0, 0.6,
+                      0.0, 0.02)
 
     st.header("Caso a inspeccionar")
-    tipo = st.selectbox("Canal", TIPOS_CANAL, format_func=lambda t: NOMBRE_CANAL[t])
+    tipo = st.selectbox("Canal", TIPOS_CANAL,
+                        format_func=lambda t: NOMBRE_CANAL[t])
     n = st.select_slider("n  (T = Tb/n)", options=list(VALORES_N), value=2)
 
-bits, fs, x_audio = cargar(subido.getvalue() if subido else None,
-                           max_muestras, int(inicio), bps)
+# ---- Fragmento -> bits ------------------------------------------------------
+i0 = int(round(inicio_s * fs))
+i1 = min(len(x_full), i0 + int(round(dur_s * fs)))
+x_frag = x_full[i0:i1].astype(np.float64).copy()
+if normalizar and np.max(np.abs(x_frag)) > 0:
+    x_frag = PICO * x_frag / np.max(np.abs(x_frag))
+bits = audio_a_bits(x_frag, bps)
+
 todos = correr(bits, sps, sigma, 0)
 res = todos[(tipo, n)]
 
-if subido is None:
-    st.info("Usando un audio sintético de prueba. Sube tu .wav en la barra lateral.")
+if bytes_wav is None:
+    st.info("Usando un audio sintético de prueba. Elige un audio incluido o "
+            "sube tu .wav en la barra lateral.")
+
+st.caption(f"Audio: {fs} Hz · {dur_total:.2f} s · mono · "
+           f"fragmento simulado: {dur_s:.2f} s ({len(bits):,} bits)")
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Bits transmitidos", f"{len(bits):,}")
@@ -76,8 +176,24 @@ c2.metric("T  /  W", f"{res.T:.4f} Tb  /  {res.W:.0f}/Tb")
 c3.metric("Apertura del ojo", f"{res.apertura:.3f}")
 c4.metric("BER", f"{res.ber:.2%}", f"{res.errores} errores", delta_color="off")
 
+# ---- Forma de onda y fragmento seleccionado --------------------------------
+fig, ax = plt.subplots(figsize=(11, 2.2))
+t_full = np.arange(len(x_full)) / fs
+ax.plot(t_full, x_full, color="0.55", lw=0.6)
+ax.axvspan(inicio_s, inicio_s + dur_s, color="tab:blue", alpha=0.18,
+           label="fragmento simulado")
+ax.set_xlim(0, dur_total)
+ax.set_xlabel("tiempo [s]")
+ax.set_ylabel("amplitud")
+ax.grid(alpha=0.3)
+ax.legend(loc="upper right", fontsize=8)
+fig.tight_layout()
+st.pyplot(fig)
+plt.close(fig)
+
 tab_sig, tab_ojo, tab_canal, tab_res, tab_audio = st.tabs(
-    ["Señales", "Diagrama de ojo", "Canal h(t) y H(f)", "BER y apertura vs n", "Audio"])
+    ["Señales", "Diagrama de ojo", "Canal h(t) y H(f)", "BER y apertura vs n",
+     "Audio"])
 
 # ---- Señales ----------------------------------------------------------------
 with tab_sig:
@@ -134,8 +250,10 @@ with tab_res:
     fig.tight_layout()
     st.pyplot(fig)
     plt.close(fig)
-    filas = [{"Canal": NOMBRE_CANAL[t], "n": nn, "T [Tb]": round(todos[(t, nn)].T, 4),
-              "W [1/Tb]": nn, "Apertura": round(todos[(t, nn)].apertura, 3),
+    filas = [{"Canal": NOMBRE_CANAL[t], "n": nn,
+              "T [Tb]": round(todos[(t, nn)].T, 4),
+              "W [1/Tb]": nn,
+              "Apertura": round(todos[(t, nn)].apertura, 3),
               "Errores": todos[(t, nn)].errores,
               "BER [%]": round(todos[(t, nn)].ber * 100, 3)}
              for t in TIPOS_CANAL for nn in VALORES_N]
@@ -143,19 +261,25 @@ with tab_res:
 
 # ---- Audio --------------------------------------------------------------------
 with tab_audio:
-    st.write("Con 8 o 16 bits por muestra, un error en un bit alto (MSB) produce un "
-             "'clic' fuerte; el ojo cerrado se **escucha**.")
+    st.write(f"Fragmento simulado: **{dur_s:.2f} s** desde {inicio_s:.2f} s "
+             f"({len(bits):,} bits). El audio completo se reproduce en la "
+             "barra lateral.")
+    st.write("Con 8 o 16 bits por muestra, un error en un bit alto (MSB) produce "
+             "un 'clic' fuerte; el ojo cerrado se **escucha**.")
     ca, cb = st.columns(2)
     with ca:
         st.write("**Original (cuantizado)**")
         st.audio(wav_bytes(fs, bits_a_audio(bits, bps)), format="audio/wav")
     with cb:
         st.write(f"**Recibido** — {NOMBRE_CANAL[tipo]}, n = {n}")
-        st.audio(wav_bytes(fs, bits_a_audio(res.bits_rx, bps)), format="audio/wav")
-    m = min(len(x_audio), len(bits) // bps)
+        st.audio(wav_bytes(fs, bits_a_audio(res.bits_rx, bps)),
+                 format="audio/wav")
+    m = min(len(x_frag), len(bits) // bps)
     fig, ax = plt.subplots(figsize=(11, 3))
-    ax.plot(bits_a_audio(bits, bps)[:m], color="gray", label="original cuantizado")
-    ax.plot(bits_a_audio(res.bits_rx, bps)[:m], color="tab:red", lw=0.9, label="recibido")
+    ax.plot(bits_a_audio(bits, bps)[:m], color="gray",
+            label="original cuantizado")
+    ax.plot(bits_a_audio(res.bits_rx, bps)[:m], color="tab:red", lw=0.9,
+            label="recibido")
     ax.set_xlabel("muestra de audio")
     ax.legend(fontsize=8)
     ax.grid(alpha=0.3)

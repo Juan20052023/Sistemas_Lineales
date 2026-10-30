@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from scipy.io import wavfile
-from scipy.signal import fftconvolve
+from scipy.signal import fftconvolve, resample_poly
 
 TB = 1.0                                   # tiempo de bit [s]
 VALORES_N = (1, 2, 4, 8, 16)               # valores de n pedidos en el enunciado
@@ -64,6 +64,37 @@ def guardar_wav(destino, fs, x):
     wavfile.write(destino, int(fs), (np.clip(x, -1, 1) * 32767).astype(np.int16))
 
 
+def remuestrear_audio(x, fs_in, fs_out):
+    """Baja la frecuencia de muestreo a `fs_out` conservando la duración.
+
+    Solo remuestrea si fs_in > fs_out (no sobremuestrea: no aporta información
+    y multiplicaría el costo de la simulación).  Se usa resample_poly, que
+    aplica un filtro antialias antes de diezmar: sin él, al bajar de 48 kHz a
+    16 kHz el contenido de alta frecuencia se plegaría sobre la banda útil
+    (aliasing).
+    """
+    if fs_out is None or int(fs_in) <= int(fs_out):
+        return x, fs_in
+    g = int(np.gcd(int(fs_in), int(fs_out)))
+    y = resample_poly(x, int(fs_out) // g, int(fs_in) // g)
+    return y, int(fs_out)
+
+
+def cargar_audio(archivo=None, fs_objetivo=None):
+    """Carga un .wav (o el demo sintético) en mono, remuestreado y sin recortar.
+
+    Devuelve (fs, x) con x en float64.  No normaliza: la normalización se hace
+    sobre el fragmento que se va a simular para no alterar la escala relativa
+    del audio completo.
+    """
+    if archivo is None:
+        fs, x = generar_wav_demo()
+    else:
+        fs, x = leer_wav(archivo)
+    x, fs = remuestrear_audio(x, fs, fs_objetivo)
+    return fs, x
+
+
 def generar_wav_demo(fs=8000, dur=0.5):
     """Audio sintético (dos tonos con envolvente) para probar sin archivo."""
     t = np.arange(int(fs * dur)) / fs
@@ -92,19 +123,18 @@ def bits_a_audio(bits, bits_por_muestra=8):
 
 
 def cargar_fuente(archivo=None, max_muestras=500, inicio=0, bits_por_muestra=8,
-                  normalizar_pico=True):
+                  normalizar_pico=True, fs_objetivo=None):
     """Carga el audio (o el demo si archivo es None) y lo convierte a bits.
 
     Se toman solo `max_muestras` muestras a partir de `inicio`, porque simular
-    todo un audio (decenas de millones de bits) no es práctico.
+    todo un audio (decenas de millones de bits) no es práctico.  Si se indica
+    `fs_objetivo`, el audio se remuestrea antes de recortar (así `inicio` y
+    `max_muestras` se refieren a la frecuencia de destino).
 
     Devuelve (bits, fs, x_usado) donde x_usado son las muestras de audio
     (normalizadas al pico) antes de cuantizar.
     """
-    if archivo is None:
-        fs, x = generar_wav_demo()
-    else:
-        fs, x = leer_wav(archivo)
+    fs, x = cargar_audio(archivo, fs_objetivo)
     x = x[inicio: inicio + max_muestras]
     if normalizar_pico and np.max(np.abs(x)) > 0:
         x = x / np.max(np.abs(x))

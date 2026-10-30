@@ -1,0 +1,70 @@
+{
+  "fs": 16000,
+  "duracion_s": 5.0,
+  "pico": 0.9,
+  "audios": [
+    {
+      "archivo": "Drown.wav",
+      "origen": "Drown.wav",
+      "inicio_s": 5.673,
+      "duracion_s": 5.0,
+      "pico": 0.9
+    },
+    {
+      "archivo": "Entity.wav",
+      "origen": "Entity.wav",
+      "inicio_s": 28.871,
+      "duracion_s": 5.0,
+      "pico": 0.9
+    },
+    {
+      "archivo": "Lakes.wav",
+      "origen": "Lakes.wav",
+      "inicio_s": 82.602,
+      "duracion_s": 5.0,
+      "pico": 0.9
+    },
+    {
+      "archivo": "Oceans.wav",
+      "origen": "Oceans.wav",
+      "inicio_s": 88.838,
+      "duracion_s": 5.0,
+      "pico": 0.9
+    },
+    {
+      "archivo": "Pond.wav",
+      "origen": "Pond.wav",
+      "inicio_s": 24.037,
+      "duracion_s": 5.0,
+      "pico": 0.9
+    },
+    {
+      "archivo": "Rivers.wav",
+      "origen": "Rivers.wav",
+      "inicio_s": 67.963,
+      "duracion_s": 5.0,
+      "pico": 0.9
+    },
+    {
+      "archivo": "Sacrifice.wav",
+      "origen": "Sacrifice.wav",
+      "inicio_s": 46.881,
+      "duracion_s": 5.0,
+      "pico": 0.9
+    },
+    {
+      "archivo": "Suspense.wav",
+      "origen": "Suspense.wav",
+      "inicio_s": 12.183,
+      "duracion_s": 5.0,
+      "pico": 0.9
+    },
+    {
+      "archivo": "Worth.wav",
+      "origen": "Worth.wav",
+      "inicio_s": 5.628,
+      "duracion_s": 5.0,
+      "pico": 0.9
+    }
+  ]
+}
