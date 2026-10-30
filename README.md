@@ -107,11 +107,20 @@ sobre cada archivo original (48 kHz, estéreo, float32):
 5. **Normalización del pico a 0.9**, dejando margen para no saturar.
 6. **Guardado como PCM de 16 bits, mono**, que es lo que lee la app.
 
-La simulación trabaja sobre un fragmento corto (0.15 s por defecto) porque cada
-bit dura `Tb = 1 s` en el modelo: simular los 5 s completos requeriría millones
-de muestras por cada uno de los 10 casos. El fragmento y su duración se eligen
-con los controles de la barra lateral; el audio completo sigue disponible en el
-reproductor.
+La app separa dos cálculos para que la duración del audio no encarezca el
+análisis:
+
+- **Ojo, apertura y BER:** se calculan sobre una ventana fija de **8.000 bits**
+  (unos 0,06 s a 16 kHz con 8 bits) para los 10 casos. Es rápido y suficiente
+  para comparar canales y valores de `n`.
+- **Audio:** se simula aparte, solo para el caso seleccionado, sobre el
+  **fragmento completo** (1 s por defecto, hasta 5 s) con **5–10 muestras por
+  bit** y un tope de 6 millones de muestras. Así se puede escuchar un fragmento
+  largo sin simular 10 veces el audio completo.
+
+El fragmento y su duración se eligen con los controles de la barra lateral. Con
+`Tb = 1 s`, simular 5 s de audio a 16 kHz y 16 bits serían 1,28 millones de bits;
+por eso el audio usa menos muestras por bit que el diagrama de ojo.
 
 ---
 
@@ -150,6 +159,21 @@ Parámetros principales de `generar_figuras.py`:
 > La simulación usa 500 muestras (4000 bits) del audio de prueba para que los
 > 10 casos se calculen en pocos segundos. Con audios completos el número de
 > bits crece varios órdenes de magnitud.
+
+Controles principales de la app:
+
+| Control | Valor por defecto | Qué hace |
+|---|---|---|
+| `Duración [s]` | `1.0` (máx. 5) | Fragmento de audio que se simula y se escucha. |
+| `Inicio [s]` | `0.0` | Punto de inicio del fragmento dentro del audio. |
+| `Bits por muestra` | `8` | Resolución PCM (8 = 256 niveles, 16 = 65.536). |
+| `Muestras por bit (ojo/BER)` | `50` | Resolución del ojo y de las métricas; no afecta al audio. |
+| `Ruido σ` | `0.0` | Ruido a la salida del canal; con `σ > 0` aparecen errores y clics. |
+
+El ojo y la BER se calculan siempre sobre los primeros **8.000 bits** del
+fragmento; el audio se simula aparte con **5–10 muestras por bit** (tope de 6
+millones de muestras). Por eso puedes escuchar 1 s o más sin que el análisis de
+los 10 casos se vuelva impracticable.
 
 ---
 

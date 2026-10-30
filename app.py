@@ -19,13 +19,18 @@ import numpy as np
 import streamlit as st
 
 from canal_pcm import (NOMBRE_CANAL, TIPOS_CANAL, VALORES_N, audio_a_bits,
-                       bits_a_audio, cargar_audio, guardar_wav, simular_todo)
+                       bits_a_audio, cargar_audio, guardar_wav, simular,
+                       simular_todo)
 from graficas import (dibujar_h, dibujar_H, dibujar_ojo, dibujar_resumen,
                       dibujar_senales)
 
 AUDIOS_DIR = Path(__file__).resolve().parent / "audios"
 FS_OBJETIVO = 16000          # frecuencia a la que se simula (mono)
 PICO = 0.9                   # margen de normalización del fragmento
+BITS_ANALISIS = 8000         # bits usados para ojo, apertura y BER
+SPS_AUDIO_MAX = 10           # muestras/bit para el audio (independiente del ojo)
+SPS_AUDIO_MIN = 5
+MUESTRAS_AUDIO_MAX = 6_000_000
 
 st.set_page_config(page_title="Canal PCM — Diagrama de ojo", layout="wide")
 st.title("Transmisión PCM por un canal de ancho de banda limitado")
@@ -65,6 +70,11 @@ def cargar(bytes_wav):
 @st.cache_resource(show_spinner="Simulando los 10 casos (2 canales × 5 valores de n)…")
 def correr(bits, sps, sigma, semilla):
     return simular_todo(bits, sps=sps, sigma=sigma, semilla=semilla)
+
+
+@st.cache_resource(show_spinner="Simulando el audio del fragmento…")
+def correr_audio(bits, tipo, n, sps, sigma, semilla):
+    return simular(bits, tipo, n, sps=sps, sigma=sigma, semilla=semilla)
 
 
 def wav_bytes(fs, x):
@@ -112,9 +122,9 @@ with st.sidebar:
         st.stop()
 
     st.header("Fragmento a simular")
-    dur_max = max(0.02, min(0.5, dur_total))
+    dur_max = max(0.02, min(5.0, dur_total))
     if "dur_s" not in st.session_state:
-        st.session_state.dur_s = 0.15
+        st.session_state.dur_s = 1.0
     st.session_state.dur_s = float(
         np.clip(st.session_state.dur_s, 0.02, dur_max))
     if dur_max > 0.0201:
@@ -143,7 +153,9 @@ with st.sidebar:
                                   f"fija en {PICO:.1f} para no saturar.")
 
     st.header("Simulación")
-    sps = st.slider("Muestras de simulación por bit", 20, 200, 50, 10)
+    sps = st.slider("Muestras por bit (ojo/BER)", 20, 200, 50, 10,
+                    help="Resolución del diagrama de ojo y de las métricas. "
+                         "El audio se simula aparte con menos muestras por bit.")
     sigma = st.slider("Ruido gaussiano σ (a la salida del canal)", 0.0, 0.6,
                       0.0, 0.02)
 
@@ -160,21 +172,35 @@ if normalizar and np.max(np.abs(x_frag)) > 0:
     x_frag = PICO * x_frag / np.max(np.abs(x_frag))
 bits = audio_a_bits(x_frag, bps)
 
-todos = correr(bits, sps, sigma, 0)
+# El ojo y la BER se calculan sobre una ventana fija de bits (rápido y
+# representativo); el audio se simula aparte sobre el fragmento completo con
+# menos muestras por bit.  Así la duración del audio no encarece el análisis.
+n_analisis = min(len(bits), BITS_ANALISIS)
+bits_analisis = bits[:n_analisis]
+todos = correr(bits_analisis, sps, sigma, 0)
 res = todos[(tipo, n)]
+
+sps_audio = int(np.clip(MUESTRAS_AUDIO_MAX // max(1, len(bits)),
+                        SPS_AUDIO_MIN, SPS_AUDIO_MAX))
+res_audio = correr_audio(bits, tipo, n, sps_audio, sigma, 0)
 
 if bytes_wav is None:
     st.info("Usando un audio sintético de prueba. Elige un audio incluido o "
             "sube tu .wav en la barra lateral.")
 
 st.caption(f"Audio: {fs} Hz · {dur_total:.2f} s · mono · "
-           f"fragmento simulado: {dur_s:.2f} s ({len(bits):,} bits)")
+           f"fragmento simulado: {dur_s:.2f} s ({len(bits):,} bits) · "
+           f"ojo/BER sobre {n_analisis:,} bits · "
+           f"audio con {sps_audio} muestras/bit")
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Bits transmitidos", f"{len(bits):,}")
+c1.metric("Bits transmitidos", f"{len(bits):,}",
+          f"{n_analisis:,} en el análisis", delta_color="off")
 c2.metric("T  /  W", f"{res.T:.4f} Tb  /  {res.W:.0f}/Tb")
 c3.metric("Apertura del ojo", f"{res.apertura:.3f}")
 c4.metric("BER", f"{res.ber:.2%}", f"{res.errores} errores", delta_color="off")
+st.caption("Apertura y BER corresponden a la ventana de análisis; el audio "
+           "se simula sobre el fragmento completo.")
 
 # ---- Forma de onda y fragmento seleccionado --------------------------------
 fig, ax = plt.subplots(figsize=(11, 2.2))
@@ -262,8 +288,8 @@ with tab_res:
 # ---- Audio --------------------------------------------------------------------
 with tab_audio:
     st.write(f"Fragmento simulado: **{dur_s:.2f} s** desde {inicio_s:.2f} s "
-             f"({len(bits):,} bits). El audio completo se reproduce en la "
-             "barra lateral.")
+             f"({len(bits):,} bits, {sps_audio} muestras/bit). El ojo y la BER "
+             f"se calculan sobre {n_analisis:,} bits.")
     st.write("Con 8 o 16 bits por muestra, un error en un bit alto (MSB) produce "
              "un 'clic' fuerte; el ojo cerrado se **escucha**.")
     ca, cb = st.columns(2)
@@ -272,13 +298,13 @@ with tab_audio:
         st.audio(wav_bytes(fs, bits_a_audio(bits, bps)), format="audio/wav")
     with cb:
         st.write(f"**Recibido** — {NOMBRE_CANAL[tipo]}, n = {n}")
-        st.audio(wav_bytes(fs, bits_a_audio(res.bits_rx, bps)),
+        st.audio(wav_bytes(fs, bits_a_audio(res_audio.bits_rx, bps)),
                  format="audio/wav")
     m = min(len(x_frag), len(bits) // bps)
     fig, ax = plt.subplots(figsize=(11, 3))
     ax.plot(bits_a_audio(bits, bps)[:m], color="gray",
             label="original cuantizado")
-    ax.plot(bits_a_audio(res.bits_rx, bps)[:m], color="tab:red", lw=0.9,
+    ax.plot(bits_a_audio(res_audio.bits_rx, bps)[:m], color="tab:red", lw=0.9,
             label="recibido")
     ax.set_xlabel("muestra de audio")
     ax.legend(fontsize=8)
